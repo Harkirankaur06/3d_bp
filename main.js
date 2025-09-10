@@ -107,6 +107,7 @@ function createWall(from, to, height, thickness) {
 // Doors
 function createDoor(at, width, height) {
   const geometry = new THREE.BoxGeometry(width, height, 0.1);
+  geometry.translate(width/2, 0, 0); // shift so pivot is at left edge
   const material = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
   const door = new THREE.Mesh(geometry, material);
   door.position.set(at[0], height / 2, at[1]);
