@@ -55,71 +55,76 @@ function animate() {
 
 // ==================== HELPERS ====================
 
-// Floor
+// ==================== FLOOR ====================
 function createFloor(points) {
   const shape = new THREE.Shape(points.map(p => new THREE.Vector2(p[0], p[1])));
   const geometry = new THREE.ShapeGeometry(shape);
   const material = new THREE.MeshPhongMaterial({ color: 0xe0e0e0, side: THREE.DoubleSide });
   const floor = new THREE.Mesh(geometry, material);
   floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
   scene.add(floor);
   return floor;
 }
 
-// Wall with CSG for doors/windows
+// ==================== WALLS WITH OPENINGS ====================
 function createWallWithOpenings(from, to, height, thickness, openings = []) {
   const dx = to[0] - from[0];
   const dz = to[1] - from[1];
-  const length = Math.sqrt(dx*dx + dz*dz);
+  const length = Math.sqrt(dx * dx + dz * dz);
 
+  // Wall geometry
   const wallGeom = new THREE.BoxGeometry(length, height, thickness);
   const wallMat = new THREE.MeshPhongMaterial({ color: 0x999999 });
-  let wall = new THREE.Mesh(wallGeom, wallMat);
+  const wall = new THREE.Mesh(wallGeom, wallMat);
 
   wall.position.set((from[0] + to[0]) / 2, height / 2, (from[1] + to[1]) / 2);
   wall.rotation.y = Math.atan2(dz, dx);
   wall.updateMatrix();
 
+  // Create CSG object
   let wallCSG = CSG.fromMesh(wall);
 
+  // Subtract openings
   openings.forEach(op => {
     const holeGeom = new THREE.BoxGeometry(op.width, op.height, thickness + 0.05);
     const hole = new THREE.Mesh(holeGeom);
+
+    // Use **world coordinates** for holes
     hole.position.set(op.at[0], op.height / 2, op.at[1]);
-    hole.rotation.y = wall.rotation.y;
+    hole.rotation.y = 0; // already handled by wall rotation
     hole.updateMatrix();
 
     wallCSG = wallCSG.subtract(CSG.fromMesh(hole));
   });
 
-  // Pass wall.matrix here, material as third argument
-  wall = CSG.toMesh(wallCSG, wall.matrix, wallMat);
-  wall.castShadow = wall.receiveShadow = true;
-  scene.add(wall);
-  return wall;
+  // Convert CSG back to mesh
+  const finalWall = CSG.toMesh(wallCSG, wall.matrix, wallMat);
+  finalWall.castShadow = true;
+  finalWall.receiveShadow = true;
+  scene.add(finalWall);
+
+  return finalWall;
 }
 
-// Simple wall
-function createWall(from, to, height, thickness) {
-  return createWallWithOpenings(from, to, height, thickness, []);
-}
-
-// Doors
-function createDoor(at, width, height) {
+// ==================== DOORS ====================
+function createDoor(at, width, height, wallRotation) {
   const geometry = new THREE.BoxGeometry(width, height, 0.1);
-  geometry.translate(width/2, 0, 0); // shift so pivot is at left edge
   const material = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
   const door = new THREE.Mesh(geometry, material);
+
+  // Center pivot is fine for now
   door.position.set(at[0], height / 2, at[1]);
-  door.userData.type = "door";
-  door.userData.isOpen = false;
+  door.rotation.y = wallRotation;
+
+  door.userData = { type: "door", isOpen: false };
   clickableObjects.push(door);
   scene.add(door);
   return door;
 }
 
-// Windows
-function createWindow(at, width, height) {
+// ==================== WINDOWS ====================
+function createWindow(at, width, height, wallRotation) {
   const geometry = new THREE.BoxGeometry(width, height, 0.05);
   const material = new THREE.MeshPhongMaterial({
     color: 0x87ceeb,
@@ -127,8 +132,11 @@ function createWindow(at, width, height) {
     transparent: true
   });
   const win = new THREE.Mesh(geometry, material);
-  win.position.set(at[0], height / 2 + 1.2, at[1]);
-  win.userData.type = "window";
+
+  win.position.set(at[0], height/2, at[1]);
+  win.rotation.y = wallRotation;
+
+  win.userData = { type: "window" };
   clickableObjects.push(win);
   scene.add(win);
   return win;
@@ -153,29 +161,37 @@ function onClick(event) {
   }
 }
 
-// ==================== BUILD FROM JSON ====================
+// ==================== BUILD FROM BLUEPRINT ====================
 function buildFromBlueprint(bp) {
   bp.rooms.forEach(room => {
     if (room.floor) createFloor(room.floor);
 
     if (room.walls) {
       room.walls.forEach(w => {
-        // Pass openings as doors/windows in this wall
         const openings = [];
+
         if (room.doors) {
-          room.doors.forEach(d => openings.push({ at: d.at, width: d.width, height: d.height }));
+          room.doors.forEach(d => {
+            openings.push({ at: d.at, width: d.width, height: d.height });
+          });
         }
         if (room.windows) {
-          room.windows.forEach(win => openings.push({ at: win.at, width: win.width, height: win.height }));
+          room.windows.forEach(win => {
+            openings.push({ at: win.at, width: win.width, height: win.height });
+          });
         }
 
-        createWallWithOpenings(w.from, w.to, w.height, w.thickness, openings);
+        const wall = createWallWithOpenings(w.from, w.to, w.height, w.thickness, openings);
+
+        // Add doors/windows aligned to this wall
+        if (room.doors) {
+          room.doors.forEach(d => createDoor(d.at, d.width, d.height, wall.rotation.y));
+        }
+        if (room.windows) {
+          room.windows.forEach(win => createWindow(win.at, win.width, win.height, wall.rotation.y));
+        }
       });
     }
-
-    // Add doors and windows as interactive meshes
-    if (room.doors) room.doors.forEach(d => createDoor(d.at, d.width, d.height));
-    if (room.windows) room.windows.forEach(win => createWindow(win.at, win.width, win.height));
   });
 }
 
