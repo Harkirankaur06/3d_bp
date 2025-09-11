@@ -244,7 +244,7 @@ function onClick(event) {
 }
 
 // ==================== LOAD JSON ====================
-fetch('./example.json')
+fetch('./example2.json')
   .then(res => res.json())
   .then(data => {
     init();
